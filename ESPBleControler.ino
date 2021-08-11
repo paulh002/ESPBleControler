@@ -353,7 +353,7 @@ void loop() {
 			{
 				if (count_vfo != 0)
 				{
-					if (loop_counter < 10 && count_vfo < 5)
+					if (loop_counter < 10 && abs(count_vfo) < 5)
 					{
 						loop_counter++;
 						continue;
