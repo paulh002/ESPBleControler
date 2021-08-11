@@ -35,11 +35,12 @@ int			button_width;
 int			button_height;
 int			button_width_margin;
 int			button_height_margin;
+int			button_selected = -1;
 
 static lv_disp_draw_buf_t	draw_buf;
 static lv_color_t			buf[screenWidth * 10];
 
-lv_obj_t*	scr, *bg_page1, *button[20];
+lv_obj_t*	scr, *bg_page1, *button[20], *button_filter[10];
 lv_style_t	text_style;
 lv_style_t	page_style;
 lv_style_t	style_btn;
@@ -47,7 +48,12 @@ lv_style_t	style_btn;
 lv_group_t	*button_group[5];
 lv_indev_t	*encoder_indev_t;
 
+String	command;
+
 void button_event_handler(lv_event_t* e);
+void create_tab_filter(lv_obj_t* tab, lv_group_t* button_group);
+void create_tab_setting(lv_obj_t* tab, lv_group_t* button_group);
+static void scroll_begin_event(lv_event_t* e);
 
 #if LV_USE_LOG != 0
 /* Serial debugging */
@@ -111,13 +117,16 @@ volatile lv_indev_state_t	enc_button_state = LV_INDEV_STATE_REL;
 
 void read_encoder(lv_indev_drv_t* indev, lv_indev_data_t* data)
 {
-	data->enc_diff = GuiEncoder.getCount();
-	GuiEncoder.clearCount();
+	if (button_selected == -1)
+	{
+		data->enc_diff = GuiEncoder.getCount();
+		GuiEncoder.clearCount();
+	}
 	data->state = enc_button_state;
 	if (data->enc_diff > 0)
 		data->enc_diff = 1;
 	if (data->enc_diff < 0)
-		data->enc_diff = -1;
+		data->enc_diff = -1;	
 	return;
 }
 
@@ -272,11 +281,12 @@ void setup() {
 	lv_obj_t* tab1 = lv_tabview_add_tab(tabview_tab, "Settings");
 	lv_obj_t* tab2 = lv_tabview_add_tab(tabview_tab, "Band");
 	lv_obj_t* tab3 = lv_tabview_add_tab(tabview_tab, "Freq");
-	lv_obj_t* tab4 = lv_tabview_add_tab(tabview_tab, "RX");
-	lv_obj_t* tab5 = lv_tabview_add_tab(tabview_tab, "TX");
+	lv_obj_t* tab4 = lv_tabview_add_tab(tabview_tab, "Filter");
+
 	
-	lv_obj_clear_flag(lv_tabview_get_content(tabview_tab), LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ONE);
-	//lv_obj_t* tab_btns = lv_tabview_get_tab_btns(tabview_tab);
+	lv_obj_clear_flag(lv_tabview_get_content(tabview_tab), LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_event_cb(lv_tabview_get_content(tabview_tab), scroll_begin_event, LV_EVENT_SCROLL_BEGIN, NULL);
+
 
 	static lv_style_t background_style;
 
@@ -301,110 +311,234 @@ void setup() {
 	lv_style_set_outline_color(&style_btn, lv_color_black());
 	lv_style_set_outline_opa(&style_btn, 255);
 
-	int				ibutton_x = 0, ibutton_y = 0;
-
-	int x_start = screenWidth - (button_width_margin * x_number_buttons);
-	x_start = x_start / 2;
-	int y_start = screenHeight - (button_height_margin * y_number_buttons) - tab_size_y;
-	y_start = y_start / 2;
-
 	button_group[0] = lv_group_create();
+	button_group[1] = lv_group_create();
+	//lv_obj_t* tab_btns = lv_tabview_get_tab_btns(tabview_tab);
+
+	//lv_group_add_obj(button_group[0], tabview_tab);
 	lv_indev_set_group(encoder_indev_t, button_group[0]);
 
-	for (int i=0; i < 9; i++)
-	{ 
-		button[i] = lv_btn_create(tab1);
-		lv_group_add_obj(button_group[0], button[i]);
-		lv_obj_add_style(button[i], &style_btn, 0);
-		lv_obj_add_event_cb(button[i], button_event_handler, LV_EVENT_CLICKED, NULL);
-		lv_obj_align(button[i], LV_ALIGN_TOP_LEFT, ibutton_x* button_width_margin , ibutton_y* button_height_margin);
-		lv_obj_add_flag(button[i], LV_OBJ_FLAG_CHECKABLE);		
-		lv_obj_set_size(button[i], button_width, button_height);
+	create_tab_filter(tab4, button_group[1]); 
+	create_tab_setting(tab1, button_group[0]);
+	
 
-		lv_obj_t* lv_label = lv_label_create(button[i]);
-
-		char str[20];
-		switch (i)
-		{
-		case 0:
-			strcpy(str, "volume");
-			break;
-		case 1:
-			strcpy(str, "gain");
-			break;
-		case 2:
-			strcpy(str, "agc");
-			break;
-		case 3:
-			strcpy(str, "0.5 Khz");
-			break;
-		case 4:
-			strcpy(str, "1 Khz");
-			break;
-		case 5:
-			strcpy(str, "1.5 Khz");
-			break;
-		case 6:
-			strcpy(str, "2 Khz");
-			break;
-		case 7:
-			strcpy(str, "2.5 Khz");
-			break;
-		case 8:
-			strcpy(str, "3 Khz");
-			break;
-		case 9:
-			strcpy(str, "3.5 Khz");
-			break;
-		
-		default:
-			sprintf(str, "%d", i);
-			break;
-		}
-		
-		lv_label_set_text(lv_label, str);
-		lv_obj_center(lv_label);
-
-		ibutton_x++;
-		if (ibutton_x >= x_number_buttons)
-		{
-			ibutton_x = 0;
-			ibutton_y++;
-		}
-	}
 	lv_obj_clear_flag(lv_tabview_get_content(tabview_tab), LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ONE);
 }
 
+
+int loop_counter = 0;
+
 // the loop function runs over and over again until power down or reset
 void loop() {
-	rotary_button.check();
-	int count = 0; //GuiEncoder.getCount(); 
-	//GuiEncoder.clearCount();
-	int count_vfo = Enc_vfo.getCount();
-	Enc_vfo.clearCount();
-
 	
-	if (count != 0 || count_vfo)
+	while (1)
 	{
-		if (deviceConnected) {
-			/* Set the value */
-			Serial.println("+Count :" + String(count));
-			char buffer[80];
-			sprintf(buffer, "%d; %d", count_vfo, count);			
-			customCharacteristic.setValue((char*)&buffer);
-			customCharacteristic.notify();
+
+		rotary_button.check();
+		int count = 0;
+
+		if (button_selected != -1)
+		{
+			count = GuiEncoder.getCount();
+			GuiEncoder.clearCount();
 		}
-	}	
-	lv_timer_handler(); /* let the GUI do its work */
-	delay(5);
+		int count_vfo = Enc_vfo.getCount();
+		Enc_vfo.clearCount();
+
+		if (count != 0 || count_vfo)
+		{
+			char buffer[80];
+
+			if (deviceConnected)
+			{
+				if (count_vfo != 0)
+				{
+					if (loop_counter < 10 && count_vfo < 5)
+					{
+						loop_counter++;
+						continue;
+					}
+					sprintf(buffer, "%d", count_vfo);
+					loop_counter = 0;
+				}
+				else
+					if (count != 0)
+					{
+						sprintf(buffer, "%s%d", command.c_str(), count);
+					}
+				customCharacteristic.setValue((char*)&buffer);
+				customCharacteristic.notify();
+			}
+		}
+		lv_timer_handler(); /* let the GUI do its work */
+		delay(5);
+	}
 }
 
 
-void button_event_handler(lv_event_t* e)
-{
+	void button_event_handler(lv_event_t * e)
+	{
 
-	lv_obj_t* obj = lv_event_get_target(e);
-	lv_obj_t* label = lv_obj_get_child(obj, 0L);
-	char* ptr = lv_label_get_text(label);
+		lv_obj_t* obj = lv_event_get_target(e);
+		lv_obj_t* label = lv_obj_get_child(obj, 0L);
+		char* ptr = lv_label_get_text(label);
 
-}
+		for (int i = 0; i < 3; i++)
+		{
+			if (button[i] != obj)
+			{
+				lv_obj_clear_state(button[i], LV_STATE_CHECKED);
+			}
+			else
+			{
+				if (i != button_selected)
+				{
+					button_selected = i;
+					switch (i)
+					{
+					case 0:
+						command = String("VOL");
+						break;
+					case 1:
+						command = String("GAIN");
+						break;
+					case 2:
+						command = String("AGC");
+						break;
+					}
+				}
+				else
+				{
+					button_selected = -1;
+					command = String("");
+					lv_obj_clear_state(button[i], LV_STATE_CHECKED);
+				}
+
+			}
+		}
+
+	}
+
+	void button_filter_event_handler(lv_event_t * e)
+	{
+
+		lv_obj_t* obj = lv_event_get_target(e);
+		lv_obj_t* label = lv_obj_get_child(obj, 0L);
+		char* ptr = lv_label_get_text(label);
+
+		for (int i = 0; i < 6; i++)
+		{
+			if (button[i] != obj)
+			{
+				lv_obj_clear_state(button[i], LV_STATE_CHECKED);
+			}
+		}
+
+	}
+
+	void create_tab_setting(lv_obj_t* tab, lv_group_t* button_group)
+	{
+		int				ibutton_x = 0, ibutton_y = 0;
+
+
+
+		for (int i = 0; i < 3; i++)
+		{
+			button[i] = lv_btn_create(tab);
+			lv_group_add_obj(button_group, button[i]);
+			lv_obj_add_style(button[i], &style_btn, 0);
+			lv_obj_add_event_cb(button[i], button_event_handler, LV_EVENT_CLICKED, NULL);
+			lv_obj_align(button[i], LV_ALIGN_TOP_LEFT, ibutton_x * button_width_margin, ibutton_y * button_height_margin);
+			lv_obj_add_flag(button[i], LV_OBJ_FLAG_CHECKABLE);
+			lv_obj_set_size(button[i], button_width, button_height);
+
+			lv_obj_t* lv_label = lv_label_create(button[i]);
+
+			char str[20];
+			switch (i)
+			{
+			case 0:
+				strcpy(str, "volume");
+				break;
+			case 1:
+				strcpy(str, "gain");
+				break;
+			case 2:
+				strcpy(str, "agc");
+				break;
+			}
+
+			lv_label_set_text(lv_label, str);
+			lv_obj_center(lv_label);
+
+			ibutton_x++;
+			if (ibutton_x >= x_number_buttons)
+			{
+				ibutton_x = 0;
+				ibutton_y++;
+			}
+		}
+	}
+
+	void create_tab_filter(lv_obj_t* tab, lv_group_t* button_group)
+	{
+		int				ibutton_x = 0, ibutton_y = 0; 
+		
+		for (int i = 0; i < 6; i++)
+		{
+			button_filter[i] = lv_btn_create(tab);
+			lv_group_add_obj(button_group, button_filter[i]);
+			lv_obj_add_style(button_filter[i], &style_btn, 0);
+			lv_obj_add_event_cb(button_filter[i], button_filter_event_handler, LV_EVENT_CLICKED, NULL);
+			lv_obj_align(button_filter[i], LV_ALIGN_TOP_LEFT, ibutton_x * button_width_margin, ibutton_y * button_height_margin);
+			lv_obj_add_flag(button_filter[i], LV_OBJ_FLAG_CHECKABLE);
+			lv_obj_set_size(button_filter[i], button_width, button_height);
+
+			lv_obj_t* lv_label = lv_label_create(button_filter[i]);
+			
+			char str[20];
+			switch (i)
+			{
+			case 0:
+				strcpy(str, "0.5 Khz");
+				break;
+			case 1:
+				strcpy(str, "1 Khz");
+				break;
+			case 2:
+				strcpy(str, "1.5 Khz");
+				break;
+			case 3:
+				strcpy(str, "2 Khz");
+				break;
+			case 4:
+				strcpy(str, "2.5 Khz");
+				break;
+			case 5:
+				strcpy(str, "3 Khz");
+				break;
+			case 6:
+				strcpy(str, "3.5 Khz");
+				break;
+			}
+			
+			lv_label_set_text(lv_label, str);
+			lv_obj_center(lv_label);
+
+			ibutton_x++;
+			if (ibutton_x >= x_number_buttons)
+			{
+				ibutton_x = 0;
+				ibutton_y++;
+			}
+		}
+	}
+
+	static void scroll_begin_event(lv_event_t* e)
+	{
+		/*Disable the scroll animations. Triggered when a tab button is clicked */
+		if (lv_event_get_code(e) == LV_EVENT_SCROLL_BEGIN) {
+			lv_anim_t* a = (lv_anim_t*)lv_event_get_param(e);
+			if (a)  a->time = 0;
+		}
+	}
