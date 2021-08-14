@@ -15,6 +15,8 @@ using namespace ace_button;
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 
+SemaphoreHandle_t GuiBinarySemaphore = NULL;
+
 TFT_eSPI tft = TFT_eSPI(); /* TFT instance */
 static const uint32_t screenWidth = 320;
 static const uint32_t screenHeight = 240;
@@ -41,6 +43,7 @@ static lv_disp_draw_buf_t	draw_buf;
 static lv_color_t			buf[screenWidth * 10];
 
 lv_obj_t*	scr, *bg_page1, *button[20], *button_filter[10];
+lv_obj_t*	tabview_tab;
 lv_style_t	text_style;
 lv_style_t	page_style;
 lv_style_t	style_btn;
@@ -144,6 +147,30 @@ BLECharacteristic customCharacteristic(
 	BLECharacteristic::PROPERTY_NOTIFY
 );
 
+static	int tab_active = 0; 
+
+void set_next_tab()
+{
+	xSemaphoreTake(GuiBinarySemaphore, portMAX_DELAY);
+	tab_active++;
+	if (tab_active > 3)
+		tab_active = 0;
+	lv_tabview_set_act(tabview_tab, tab_active, LV_ANIM_ON);
+	switch (tab_active)
+	{
+	case 0:
+		lv_indev_set_group(encoder_indev_t, button_group[0]);
+		break;
+	case 3:
+		lv_indev_set_group(encoder_indev_t, button_group[1]);
+		lv_group_focus_obj(button_filter[0]);
+		break;
+	}
+	xSemaphoreGive(GuiBinarySemaphore);
+
+
+}
+
 static void rotary_button_eventhandler(AceButton*, uint8_t eventType, uint8_t buttonState)
 {
 	switch (eventType) {
@@ -151,6 +178,7 @@ static void rotary_button_eventhandler(AceButton*, uint8_t eventType, uint8_t bu
 		//ToggleSetup(true);
 		//enc_button_state = LV_INDEV_STATE_REL;
 		Serial.println("Long press");
+		set_next_tab();
 		break;
 	case AceButton::kEventPressed:
 		enc_button_state = LV_INDEV_STATE_PR;
@@ -181,8 +209,18 @@ class ServerCallbacks : public BLEServerCallbacks {
 // the setup function runs once when you press reset or power the board
 void setup() {
 	Serial.begin(115200); 
+	
+	GuiBinarySemaphore = xSemaphoreCreateMutex();
+	if (GuiBinarySemaphore == NULL) {
+		Serial.println("Error creating the GuiBinarySemaphore");
+	}
+	
 	pinMode(ROTARY_PRESS, INPUT);
 	rotary_button.setEventHandler(rotary_button_eventhandler);
+	
+	ace_button::ButtonConfig* buttonConfig = rotary_button.getButtonConfig();
+	buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
+	
 	ESP32Encoder::useInternalWeakPullResistors = NONE;
 	GuiEncoder.attachHalfQuad(ROTARY_B, ROTARY_A);
 	GuiEncoder.setFilter(1023);
@@ -270,7 +308,7 @@ void setup() {
 	lv_style_set_bg_color(&page_style, lv_color_black());
 	lv_obj_add_style(scr, &page_style, 0);
 
-	lv_obj_t* tabview_tab = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, tab_size_y);
+	tabview_tab = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, tab_size_y);
 	lv_obj_set_pos(tabview_tab, 0, 0);
 	lv_obj_set_size(tabview_tab, screenWidth, screenHeight);
 	lv_obj_add_style(tabview_tab, &page_style, 0);
@@ -370,7 +408,9 @@ void loop() {
 				customCharacteristic.notify();
 			}
 		}
+		xSemaphoreTake(GuiBinarySemaphore, portMAX_DELAY);
 		lv_timer_handler(); /* let the GUI do its work */
+		xSemaphoreGive(GuiBinarySemaphore);
 		delay(5);
 	}
 }
@@ -428,9 +468,9 @@ void loop() {
 
 		for (int i = 0; i < 6; i++)
 		{
-			if (button[i] != obj)
+			if (button_filter[i] != obj)
 			{
-				lv_obj_clear_state(button[i], LV_STATE_CHECKED);
+				lv_obj_clear_state(button_filter[i], LV_STATE_CHECKED);
 			}
 		}
 
