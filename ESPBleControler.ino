@@ -112,10 +112,15 @@ void my_touchpad_read(lv_indev_drv_t* indev_driver, lv_indev_data_t* data)
 #define ROTARY_A      16      
 #define ROTARY_B      17
 #define ROTARY_PRESS  22
+#define TXRX_SWITCH   25
 
 ESP32Encoder    Enc_vfo; 
 ESP32Encoder	GuiEncoder;
 AceButton       rotary_button(ROTARY_PRESS);
+
+ButtonConfig	txrxConfig;
+AceButton       txrx_button(&txrxConfig);
+
 volatile lv_indev_state_t	enc_button_state = LV_INDEV_STATE_REL;
 
 void read_encoder(lv_indev_drv_t* indev, lv_indev_data_t* data)
@@ -192,6 +197,32 @@ static void rotary_button_eventhandler(AceButton*, uint8_t eventType, uint8_t bu
 	}
 }
 
+static void txrx_button_eventhandler(AceButton*, uint8_t eventType, uint8_t buttonState)
+{
+	char buffer[80];
+
+	switch (eventType) {
+	case AceButton::kEventLongPressed:
+		//ToggleSetup(true);
+		//enc_button_state = LV_INDEV_STATE_REL;
+		Serial.println("rx Long press");
+		break;
+	case AceButton::kEventPressed:;
+		Serial.println("rx Pressed");
+		strcpy(buffer, "TX");
+		customCharacteristic.setValue((char*)&buffer);
+		customCharacteristic.notify();
+		break;
+
+	case AceButton::kEventReleased:
+		Serial.println("rx Released");
+		strcpy(buffer, "RX");
+		customCharacteristic.setValue((char*)&buffer);
+		customCharacteristic.notify();
+		break;
+	}
+}
+
 /* This function handles the server callbacks */
 bool deviceConnected = false;
 class ServerCallbacks : public BLEServerCallbacks {
@@ -214,9 +245,12 @@ void setup() {
 	if (GuiBinarySemaphore == NULL) {
 		Serial.println("Error creating the GuiBinarySemaphore");
 	}
-	
+	pinMode(TXRX_SWITCH, INPUT);
 	pinMode(ROTARY_PRESS, INPUT);
 	rotary_button.setEventHandler(rotary_button_eventhandler);
+	
+	txrxConfig.setEventHandler(txrx_button_eventhandler);
+	txrx_button.init(TXRX_SWITCH);
 	
 	ace_button::ButtonConfig* buttonConfig = rotary_button.getButtonConfig();
 	buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
@@ -365,10 +399,13 @@ void setup() {
 
 
 int loop_counter = 0;
+int	tx = 0;
 
 // the loop function runs over and over again until power down or reset
 void loop() {
 	
+	char buffer[80];
+
 	while (1)
 	{
 
@@ -383,10 +420,27 @@ void loop() {
 		int count_vfo = Enc_vfo.getCount();
 		Enc_vfo.clearCount();
 
+		if ((command == "TX") && (tx == 0))
+		{
+			tx = 1;
+			strcpy(buffer, "TX");
+			customCharacteristic.setValue((char*)&buffer);
+			customCharacteristic.notify();
+		}
+		if (tx == 1)
+		{
+			lv_state_t state = lv_obj_get_state(button[0]);
+			if ((state & LV_STATE_CHECKED) == 0)
+			{
+				tx = 0;
+				strcpy(buffer, "RX");
+				customCharacteristic.setValue((char*)&buffer);
+				customCharacteristic.notify();
+			}
+		}
+
 		if (count != 0 || count_vfo)
 		{
-			char buffer[80];
-
 			if (deviceConnected)
 			{
 				if (count_vfo != 0)
@@ -423,7 +477,7 @@ void loop() {
 		lv_obj_t* label = lv_obj_get_child(obj, 0L);
 		char* ptr = lv_label_get_text(label);
 
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 4; i++)
 		{
 			if (button[i] != obj)
 			{
@@ -437,15 +491,21 @@ void loop() {
 					switch (i)
 					{
 					case 0:
-						command = String("VOL");
+						command = String("TX"); 
 						break;
 					case 1:
-						command = String("GAIN");
+						command = String("VOL");
 						break;
 					case 2:
+						command = String("GAIN");
+						break;
+					case 3:
 						command = String("AGC");
 						break;
 					}
+					Serial.print("command: ");
+					Serial.print(command);
+					Serial.println();
 				}
 				else
 				{
@@ -480,9 +540,7 @@ void loop() {
 	{
 		int				ibutton_x = 0, ibutton_y = 0;
 
-
-
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 4; i++)
 		{
 			button[i] = lv_btn_create(tab);
 			lv_group_add_obj(button_group, button[i]);
@@ -498,12 +556,15 @@ void loop() {
 			switch (i)
 			{
 			case 0:
+				strcpy(str, "TX");
+				break; 
+			case 1:
 				strcpy(str, "volume");
 				break;
-			case 1:
+			case 2:
 				strcpy(str, "gain");
 				break;
-			case 2:
+			case 3:
 				strcpy(str, "agc");
 				break;
 			}
